@@ -16,24 +16,6 @@
 
 package com.jaiselrahman.filepicker.model;
 
-import android.content.ContentResolver;
-import android.database.Cursor;
-import android.net.Uri;
-import android.os.Build;
-import android.provider.MediaStore;
-
-import androidx.annotation.NonNull;
-import androidx.core.content.ContentResolverCompat;
-import androidx.paging.DataSource;
-import androidx.paging.PositionalDataSource;
-
-import com.jaiselrahman.filepicker.config.Configurations;
-import com.jaiselrahman.filepicker.utils.FileUtils;
-
-import java.io.File;
-import java.util.ArrayList;
-import java.util.List;
-
 import static android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE;
 import static android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO;
 import static android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE;
@@ -44,6 +26,26 @@ import static android.provider.MediaStore.MediaColumns.DATA;
 import static android.provider.MediaStore.MediaColumns.DATE_ADDED;
 import static android.provider.MediaStore.MediaColumns.DISPLAY_NAME;
 import static android.provider.MediaStore.MediaColumns.SIZE;
+
+import android.content.ContentResolver;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.provider.MediaStore;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
+import androidx.core.content.ContentResolverCompat;
+import androidx.paging.DataSource;
+import androidx.paging.PositionalDataSource;
+
+import com.jaiselrahman.filepicker.config.Configurations;
+import com.jaiselrahman.filepicker.utils.FileUtils;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MediaFileDataSource extends PositionalDataSource<MediaFile> {
 
@@ -157,9 +159,58 @@ public class MediaFileDataSource extends PositionalDataSource<MediaFile> {
     }
 
     private List<MediaFile> getMediaFiles(int offset, int limit) {
+        try {
+            return getMediaFilesDefaultImpl(offset, limit);
+        } catch (Exception e) {
+            e.printStackTrace();
+
+            // workaround for using LIMIT's in the query for the some devices (Pixel)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                return getMediaFilesNewImpl(offset, limit);
+            } else {
+                return null;
+            }
+        }
+    }
+
+    private List<MediaFile> getMediaFilesDefaultImpl(int offset, int limit) {
         Cursor data = ContentResolverCompat.query(contentResolver, uri, projection,
                 selection, selectionArgs,
                 sortOrder + " LIMIT " + limit + " OFFSET " + offset, null);
+
+        return MediaFileLoader.asMediaFiles(data, configs);
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.O)
+    private List<MediaFile> getMediaFilesNewImpl(int offset, int limit) {
+        Bundle queryArgs = new Bundle();
+
+        // Limit and offset
+        if (offset > 0) {
+            queryArgs.putInt(ContentResolver.QUERY_ARG_OFFSET, offset);
+        }
+        if (limit > 0) {
+            queryArgs.putInt(ContentResolver.QUERY_ARG_LIMIT, limit);
+        }
+
+        // Sort function
+        queryArgs.putString(
+                ContentResolver.QUERY_ARG_SORT_COLUMNS,
+                MediaStore.MediaColumns.DATE_ADDED
+        );
+        queryArgs.putInt(
+                ContentResolver.QUERY_ARG_SORT_DIRECTION,
+                ContentResolver.QUERY_SORT_DIRECTION_DESCENDING
+        );
+
+        // Selection
+        queryArgs.putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection);
+        queryArgs.putStringArray(
+                ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS,
+                selectionArgs
+        );
+
+        Cursor data = contentResolver.query(uri, projection, queryArgs, null);
 
         return MediaFileLoader.asMediaFiles(data, configs);
     }
